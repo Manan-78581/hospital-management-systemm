@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Hospital Management System</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      body {
+        font-family: 'Inter', sans-serif;
+      }
+    </style>
+  </head>
+  <body class="bg-gray-100 font-sans antialiased">
+    <noscript>You need to enable JavaScript to run this app.</noscript>
+    <div id="root"></div>
+
+    <!-- React and React DOM from CDN -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <!-- Babel for JSX transformation -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Axios for API calls -->
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <!-- Font Awesome for Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" />
+
+    <script type="text/babel">
+      const { useState, useEffect, useContext, createContext } = React;
+      const { createRoot } = ReactDOM;
+
+      // --- Authentication Context ---
+      const AuthContext = createContext();
+
+      const AuthProvider = ({ children }) => {
+        const [user, setUser] = useState(null);
+        const [loading, setLoading] = useState(true);
+
+        useEffect(() => {
+          const storedUser = localStorage.getItem('userInfo');
+          if (storedUser) {
+            setUser(JSON.parse(storedUser));
+          }
+          setLoading(false);
+        }, []);
+
+        const login = (userInfo) => {
+          localStorage.setItem('userInfo', JSON.stringify(userInfo));
+          setUser(userInfo);
+        };
+
+        const logout = () => {
+          localStorage.removeItem('userInfo');
+          setUser(null);
+        };
+
+        return (
+          <AuthContext.Provider value={{ user, login, logout, loading }}>
+            {children}
+          </AuthContext.Provider>
+        );
+      };
+
+      // --- API Service ---
+      const API = axios.create({
+        baseURL: 'http://localhost:5000/api',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      API.interceptors.request.use((config) => {
+        const userInfo = JSON.parse(localStorage.getItem('userInfo'));
+        if (userInfo && userInfo.token) {
+          config.headers.Authorization = `Bearer ${userInfo.token}`;
+        }
+        return config;
+      });
+
+      // --- Reusable Components ---
+      const Button = ({ children, onClick, disabled, className }) => (
+        <button
+          onClick={onClick}
+          disabled={disabled}
+          className={`w-full py-3 px-4 rounded-xl text-white font-semibold transition-all duration-300
+            ${disabled ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}
+            ${className}`}
+        >
+          {children}
+        </button>
+      );
+
+      const Input = ({ type, placeholder, value, onChange, className }) => (
+        <input
+          type={type}
+          placeholder={placeholder}
+          value={value}
+          onChange={onChange}
+          className={`w-full py-3 px-4 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-300
+            ${className}`}
+        />
+      );
+
+      const Card = ({ children, className }) => (
+        <div className={`bg-white p-8 rounded-3xl shadow-lg w-full max-w-md ${className}`}>
+          {children}
+        </div>
+      );
+      
+      const Message = ({ text, type }) => (
+        <div className={`p-3 rounded-lg text-center font-medium ${type === 'error' ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'}`}>
+            {text}
+        </div>
+      );
+
+      const Navbar = ({ user }) => {
+        return (
+          <nav className="bg-white p-4 shadow-md flex justify-between items-center rounded-b-3xl">
+            <h1 className="text-xl font-bold text-gray-800">Welcome, {user.name}!</h1>
+            <p className="text-gray-600 capitalize">Role: <span className="font-semibold text-blue-600">{user.role}</span></p>
+          </nav>
+        );
+      };
+
+      const Sidebar = ({ setView }) => {
+        const { logout, user } = useContext(AuthContext);
+        
+        const NavLink = ({ targetView, label }) => (
+          <button
+            onClick={() => setView(targetView)}
+            className="flex items-center w-full px-4 py-3 rounded-xl text-left text-gray-700 font-medium hover:bg-gray-200 transition-colors duration-200"
+          >
+            {label}
+          </button>
+        );
+      
+        return (
+          <aside className="w-64 bg-white p-6 shadow-xl rounded-r-3xl h-screen flex flex-col fixed z-10">
+            <h1 className="text-2xl font-bold text-gray-800 mb-8">HMS</h1>
+            <nav className="flex-grow">
+              <NavLink targetView="dashboard" label="Dashboard" />
+              {user.role === 'doctor' && (
+                <>
+                  <NavLink targetView="patients" label="My Patients" />
+                  <NavLink targetView="appointments" label="My Appointments" />
+                </>
+              )}
+              {user.role === 'admin' && (
+                <>
+                  <NavLink targetView="adminDashboard" label="Admin Dashboard" />
+                  <NavLink targetView="allPatients" label="All Patients" />
+                  <NavLink targetView="allDoctors" label="All Doctors" />
+                </>
+              )}
+            </nav>
+            <Button onClick={logout} className="mt-auto">Logout</Button>
+          </aside>
+        );
+      };
+
+      // --- Pages ---
+      const Login = ({ setView }) => {
+        const [email, setEmail] = useState('');
+        const [password, setPassword] = useState('');
+        const [message, setMessage] = useState('');
+        const { login } = useContext(AuthContext);
+        const [loading, setLoading] = useState(false);
+
+        const handleSubmit = async (e) => {
+          e.preventDefault();
+          setMessage('');
+          setLoading(true);
+          try {
+            const { data } = await API.post('/auth/login', { email, password });
+            login(data);
+          } catch (err) {
+            setMessage({ text: err.response?.data?.message || 'Something went wrong', type: 'error' });
+          } finally {
+            setLoading(false);
+          }
+        };
+
+        return (
+          <Card className="flex flex-col items-center">
+            <h2 className="text-3xl font-bold text-gray-800 mb-6">Login</h2>
+            <form onSubmit={handleSubmit} className="w-full space-y-4">
+              <Input
+                type="email"
+                placeholder="Email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+              <Input
+                type="password"
+                placeholder="Password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+              {message && <Message text={message.text} type={message.type} />}
+              <Button type="submit" disabled={loading}>
+                {loading ? 'Logging in...' : 'Login'}
+              </Button>
+            </form>
+            <p className="mt-4 text-sm text-gray-600">
+              New User?{' '}
+              <button onClick={() => setView('register')} className="text-blue-600 font-semibold hover:underline">
+                Register here
+              </button>
+            </p>
+          </Card>
+        );
+      };
+
+      const Register = ({ setView }) => {
+        const [name, setName] = useState('');
+        const [email, setEmail] = useState('');
+        const [password, setPassword] = useState('');
+        const [role, setRole] = useState('patient');
+        const [message, setMessage] = useState('');
+        const { login } = useContext(AuthContext);
+        const [loading, setLoading] = useState(false);
+
+        const handleSubmit = async (e) => {
+          e.preventDefault();
+          setMessage('');
+          setLoading(true);
+          try {
+            const { data } = await API.post('/auth/register', { name, email, password, role });
+            login(data);
+          } catch (err) {
+            setMessage({ text: err.response?.data?.message || 'Something went wrong', type: 'error' });
+          } finally {
+            setLoading(false);
+          }
+        };
+
+        return (
+          <Card className="flex flex-col items-center">
+            <h2 className="text-3xl font-bold text-gray-800 mb-6">Register</h2>
+            <form onSubmit={handleSubmit} className="w-full space-y-4">
+              <Input
+                type="text"
+                placeholder="Name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
+              <Input
+                type="email"
+                placeholder="Email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+              <Input
+                type="password"
+                placeholder="Password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+              <select
+                value={role}
+                onChange={(e) => setRole(e.target.value)}
+                className="w-full py-3 px-4 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-300"
+              >
+                <option value="patient">Patient</option>
+                <option value="doctor">Doctor</option>
+                <option value="staff">Staff</option>
+                <option value="receptionist">Receptionist</option>
+                <option value="admin">Admin</option>
+              </select>
+              {message && <Message text={message.text} type={message.type} />}
+              <Button type="submit" disabled={loading}>
+                {loading ? 'Registering...' : 'Register'}
+              </Button>
+            </form>
+            <p className="mt-4 text-sm text-gray-600">
+              Already have an account?{' '}
+              <button onClick={() => setView('login')} className="text-blue-600 font-semibold hover:underline">
+                Login here
+              </button>
+            </p>
+          </Card>
+        );
+      };
+      
+      const Dashboard = () => {
+        const { user } = useContext(AuthContext);
+        return (
+          <div className="p-8 flex-grow">
+            <h1 className="text-3xl font-bold text-gray-800 mb-4">
+              Dashboard
+            </h1>
+            <p className="text-gray-600 text-lg mb-6">
+              Your role is: <span className="font-semibold text-blue-600 capitalize">{user.role}</span>
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              <Card className="max-w-none">
+                <h2 className="text-xl font-semibold mb-4">Upcoming Appointments</h2>
+                <ul className="space-y-3 text-gray-700">
+                  <li>No appointments scheduled.</li>
+                </ul>
+              </Card>
+              <Card className="max-w-none">
+                <h2 className="text-xl font-semibold mb-4">My Patients</h2>
+                <ul className="space-y-3 text-gray-700">
+                  <li>No patients assigned.</li>
+                </ul>
+              </Card>
+              <Card className="max-w-none">
+                <h2 className="text-xl font-semibold mb-4">Recent Activity</h2>
+                <ul className="space-y-3 text-gray-700">
+                  <li>Updated profile information.</li>
+                  <li>Logged in to the system.</li>
+                </ul>
+              </Card>
+            </div>
+          </div>
+        );
+      };
+      
+      const Patients = () => {
+        return (
+            <div className="p-8 flex-grow">
+              <h1 className="text-3xl font-bold text-gray-800 mb-4">My Patients</h1>
+              <p className="text-gray-600">This section is under construction. It will display a list of all your patients and their details.</p>
+            </div>
+        )
+      };
+      
+      const Appointments = () => {
+        return (
+            <div className="p-8 flex-grow">
+              <h1 className="text-3xl font-bold text-gray-800 mb-4">My Appointments</h1>
+              <p className="text-gray-600">This section is under construction. It will display a list of all your upcoming and past appointments.</p>
+            </div>
+        )
+      };
+
+      const AdminDashboard = () => (
+          <div className="p-8 flex-grow">
+              <h1 className="text-3xl font-bold text-gray-800 mb-4">Admin Dashboard</h1>
+              <p className="text-gray-600">This section is under construction. It will show a summary for administrators.</p>
+          </div>
+      );
+
+      const AllPatients = () => (
+          <div className="p-8 flex-grow">
+              <h1 className="text-3xl font-bold text-gray-800 mb-4">All Patients</h1>
+              <p className="text-gray-600">This section is under construction. It will list all patients in the system.</p>
+          </div>
+      );
+
+      const AllDoctors = () => (
+          <div className="p-8 flex-grow">
+              <h1 className="text-3xl font-bold text-gray-800 mb-4">All Doctors</h1>
+              <p className="text-gray-600">This section is under construction. It will list all doctors in the system.</p>
+          </div>
+      );
+
+      // --- Main App Component ---
+      const App = () => {
+        const [view, setView] = useState('login');
+        const { user, loading } = useContext(AuthContext);
+
+        // This effect synchronizes the view with the user's auth status
+        useEffect(() => {
+            if (!loading) {
+                if (user) {
+                    setView('dashboard');
+                } else {
+                    setView('login');
+                }
+            }
+        }, [loading, user]);
+
+        // Function to select the current component based on the view state
+        const renderView = () => {
+          switch (view) {
+            case 'login':
+              return <Login setView={setView} />;
+            case 'register':
+              return <Register setView={setView} />;
+            case 'dashboard':
+              return <Dashboard />;
+            case 'patients':
+              return <Patients />;
+            case 'appointments':
+              return <Appointments />;
+            case 'adminDashboard':
+              return <AdminDashboard />;
+            case 'allPatients':
+              return <AllPatients />;
+            case 'allDoctors':
+              return <AllDoctors />;
+            default:
+              return null;
+          }
+        };
+
+        if (loading) {
+          return (
+            <div className="flex justify-center items-center min-h-screen text-gray-600">
+              Loading...
+            </div>
+          );
+        }
+
+        if (user) {
+          return (
+            <div className="flex bg-gray-100 min-h-screen">
+              <Sidebar setView={setView} />
+              <div className="flex-grow p-4 md:ml-64 relative">
+                  <Navbar user={user} />
+                  <main className="p-6">
+                      {renderView()}
+                  </main>
+              </div>
+            </div>
+          );
+        }
+
+        return (
+          <div className="flex items-center justify-center min-h-screen p-4">
+            {renderView()}
+          </div>
+        );
+      }
+
+      // --- App Root Component (wraps App with AuthProvider) ---
+      const AppRoot = () => {
+        return (
+          <AuthProvider>
+            <App />
+          </AuthProvider>
+        );
+      }
+
+      const container = document.getElementById('root');
+      const root = createRoot(container);
+      root.render(<AppRoot />);
+    </script>
+  </body>
+</html>
